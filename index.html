@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ETF Holdings Aggregator – Equities Only</title>
+  <title>ETF Holdings Aggregator – US Common Stocks Only</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -140,15 +140,16 @@
   <div class="app">
     <h1>ETF Holdings Aggregator</h1>
     <p class="subtitle">
-      Upload one or more CSV files downloaded from ETF websites (BOUT, FFTY,
-      QMOM, etc.). This tool extracts <strong>only stock (equity) tickers</strong>
-      and aggregates them into a single comma-separated list (no ETFs, no options,
-      no CUSIPs, no quotes).
+      Upload one or more <code>xt_holdings</code>-style CSV files. This tool
+      extracts <strong>only U.S.-style common stocks</strong> as best it can:
+      it removes ETFs, swaps/options, bonds/T-bills, money market, cash, ADRs /
+      foreign listings, and keeps equity-like tickers that look like U.S.
+      common shares.
     </p>
 
     <!-- File upload -->
     <div>
-      <label for="filesInput">Holdings CSV files</label>
+      <label for="filesInput">Holdings CSV files (xt_holdings)</label>
       <input
         type="file"
         id="filesInput"
@@ -156,25 +157,28 @@
         multiple
       />
       <p class="small mt-4">
-        You can select multiple files at once (e.g., BOUT.csv, FFTY.csv,
-        QMOM.csv). The tool auto-detects the ticker column and a name/description
-        column. It then keeps only stock-like tickers whose security name does
-        <strong>not</strong> look like an ETF or fund.
+        Expect columns like <code>Date, Account, StockTicker, CUSIP, SecurityName, MoneyMarketFlag</code>.
+        The app:
+        <br>• Reads <strong>StockTicker</strong> for the raw symbol
+        <br>• Uses <strong>SecurityName</strong> + <strong>MoneyMarketFlag</strong> + <strong>CUSIP</strong>
+        to drop ETFs, TRS/swaps, options, bonds/T-Bills, money market &amp; cash
+        <br>• Then tries to keep <strong>only U.S. common stocks</strong> (filters out ADRs / PLC / SA / NV / AG, etc.).
       </p>
 
       <div id="fileSummary" class="file-summary" style="display:none;"></div>
 
       <div class="mt-16">
-        <button id="aggregateBtn" class="primary">🔄 Aggregate tickers</button>
+        <button id="aggregateBtn" class="primary">🔄 Aggregate U.S. common stocks</button>
         <span id="status" class="status"></span>
       </div>
     </div>
 
     <!-- Output -->
     <div class="mt-32">
-      <h2 style="font-size:1.15rem; margin:0 0 8px;">Comma-separated tickers</h2>
+      <h2 style="font-size:1.15rem; margin:0 0 8px;">Comma-separated U.S. stocks</h2>
       <p class="small" style="margin:0 0 8px;">
-        Unique equity tickers from all uploaded files (sorted alphabetically, no quotes, ETFs removed).
+        Unique U.S.-style common-stock tickers from all uploaded
+        <code>xt_holdings</code> files (sorted alphabetically, no quotes).
       </p>
 
       <label for="commaOutput" style="margin-bottom:4px;">Output</label>
@@ -196,7 +200,6 @@
     const fileSummaryEl = document.getElementById("fileSummary");
     const commaOutputEl = document.getElementById("commaOutput");
 
-    // Store parsed tickers per file
     let parsedFiles = [];
 
     function setStatus(msg, type = "") {
@@ -204,7 +207,7 @@
       statusEl.className = "status" + (type ? " " + type : "");
     }
 
-    // Decide if a ticker string is a stock-like ticker (pattern only)
+    // Normalize a ticker to an equity-style code (US-like)
     function normalizeEquityTicker(raw) {
       if (!raw) return null;
       let t = String(raw).trim();
@@ -217,91 +220,95 @@
       ) {
         t = t.slice(1, -1);
       }
-
       t = t.trim();
       if (!t) return null;
 
-      // Take only the first token before whitespace
+      // Take only first token before whitespace (e.g. "AAPL TRS 0929" -> "AAPL")
       let base = t.split(/\s+/)[0];
       base = base.trim().toUpperCase();
       if (!base) return null;
 
-      // Filter out obvious non-tickers
-      const blacklistExact = new Set([
-        "CASH",
-        "OTHER",
-        "CASH&OTHER",
-        "NA"
-      ]);
+      const blacklistExact = new Set(["CASH", "OTHER", "CASH&OTHER", "NA"]);
       if (blacklistExact.has(base)) return null;
-      if (base.includes("&")) return null; // anything like CASH&OTHER
+      if (base.includes("&")) return null;
 
-      // Share-class symbols with slash (e.g. BRK/B, HEI/A, CWEN/A)
+      // Allow share-class symbols with slash (BRK/B, HEI/A, CWEN/A)
       const shareClassSlash = /^[A-Z]{1,4}\/[A-Z]$/;
-      // Simple equity ticker: 1–5 letters, no digits
       const simpleEquity = /^[A-Z]{1,5}$/;
 
-      // Money-market / fund-style like FGXXX -> reject if ends with 'XXX'
+      // Money-market style like FGXXX: drop
       if (/XXX$/.test(base)) return null;
 
-      if (shareClassSlash.test(base)) {
-        return base;
-      }
-
-      if (!simpleEquity.test(base)) {
-        // reject anything with digits or weird punctuation
-        return null;
-      }
+      if (shareClassSlash.test(base)) return base;
+      if (!simpleEquity.test(base)) return null;
 
       return base;
     }
 
-    // Decide if a row is likely an ETF/fund based on security name
-    function isLikelyETF(ticker, name) {
-      const n = (name || "").toLowerCase();
-      if (!n) return false;
+    // Non-equity filter: ETF, swaps, options, bonds, MMF, cash, etc.
+    function isLikelyNonEquity(ticker, name, mmFlag, cusip) {
+      const n = (name || "").toUpperCase();
+      const mm = (mmFlag || "").toUpperCase().trim();
+      const c = (cusip || "").toUpperCase().trim();
 
-      // Strong ETF/fund indicators in the security name
-      const keywords = [
-        " etf",
-        "exchange traded fund",
-        "exchange-traded fund",
-        "index fund",
-        "index etf",
-        "fund ",
-        "fund,",
-        "fund (",
-        "fund-",
-        "spdr ",
-        "ishares",
-        "vanguard",
-        "invesco",
-        "xtrackers",
-        "wisdomtree",
-        "ark ",
-        "arkf",
-        "arkg",
-        "arkk",
-        "arkq",
-        "arkw"
+      // Money market / cash
+      if (mm && /^(Y|YES|1|TRUE)$/.test(mm)) return true;
+      if (/\b(CASH|MONEY\s*MARKET|MMF|LIQUIDITY)\b/.test(n)) return true;
+
+      // US Treasuries / bills
+      if (/\b(TREASURY|T-BILL|TBILL|T BILL)\b/.test(n)) return true;
+      if (c.startsWith("9127")) return true; // common US Treasury CUSIP prefix
+
+      // ETFs / funds
+      if (/\bETF\b/.test(n)) return true;
+      const etfWords = [
+        "SPDR", "SPDR®", "ISHARES", "VANGUARD", "POWERSHARES",
+        "XTRACKERS", "WISDOMTREE", "INDEX FUND", "UCITS ETF",
+        "EXCHANGE TRADED FUND", "FUND TRUST"
       ];
-
-      // We always treat explicit "etf" as ETF
-      if (/\betf\b/i.test(name || "")) return true;
-
-      for (const kw of keywords) {
-        if (n.includes(kw)) return true;
+      for (const w of etfWords) {
+        if (n.includes(w)) return true;
       }
 
-      // Otherwise, assume it's not an ETF
+      // Derivatives: swaps, TRS, options, futures, warrants, rights
+      if (/\b(SWAP|SWP|TRS|TOTAL RETURN|FUTURE|FUTURES|FORWARD|FWD|OPTION|CALL|PUT|WARRANT|RIGHTS?)\b/.test(n)) {
+        return true;
+      }
+
+      // Notes / bonds / preferreds
+      if (/\b(BOND|NOTE|DEBENTURE|PFD|PREFERRED)\b/.test(n)) return true;
+
+      // Anything explicitly saying "INDEX" that's not clearly a company
+      if (/\bINDEX\b/.test(n) && !/\bCORP\b/.test(n)) return true;
+
       return false;
     }
 
-    // Detect delimiter by counting commas/semicolons/tabs in the first few lines
+    // Additional: filter to *U.S. common stocks* as best as possible
+    function isLikelyNonUSCommon(ticker, name, cusip) {
+      const n = (name || "").toUpperCase();
+      const c = (cusip || "").toUpperCase().trim();
+
+      // ADRs / depositary receipts / foreign listing hints
+      if (/\b(ADR|ADS|GDR|SP ADR|UNSPONSORED)\b/.test(n)) return true;
+      if (/\b(ORDINARY|ORD SHS|ORD SHARES|ORD)\b/.test(n)) return true;
+
+      // Common non-US legal forms at end of name: PLC, SA, NV, AG, BV, OYJ, KK, etc.
+      if (/\b(PLC|S\.?A\.?|N\.?V\.?|AG|BV|OYJ|S\.P\.A\.?|SPA)\b/.test(n)) {
+        return true;
+      }
+
+      // Heuristic via CUSIP:
+      // Non-US often still have US CUSIP, so we can't fully rely on this.
+      // We'll not hard-filter by CUSIP to avoid killing real US names.
+
+      return false;
+    }
+
+    // Detect delimiter (comma / semicolon / tab)
     function detectDelimiter(lines) {
       const candidates = [",", ";", "\t"];
       const scores = { ",": 0, ";": 0, "\t": 0 };
-
       const sampleLines = lines.slice(0, Math.min(lines.length, 10));
       for (const line of sampleLines) {
         for (const d of candidates) {
@@ -309,114 +316,80 @@
           scores[d] += c;
         }
       }
-
-      let bestDelim = ",";
+      let best = ",";
       let bestScore = -1;
       for (const d of candidates) {
         if (scores[d] > bestScore) {
           bestScore = scores[d];
-          bestDelim = d;
+          best = d;
         }
       }
-      return bestDelim;
+      return best;
     }
 
-    // Try to find a header row and ticker column index by header name
-    function findHeaderAndTickerIndex(lines, delimiter) {
-      const maxHeaderScan = Math.min(lines.length, 15);
-      const headerPatterns = /(ticker|symbol|underlying)/i;
-
-      for (let i = 0; i < maxHeaderScan; i++) {
-        const cols = lines[i].split(delimiter).map((c) => c.trim());
-        for (let j = 0; j < cols.length; j++) {
-          if (headerPatterns.test(cols[j])) {
-            return { headerRowIndex: i, tickerIdx: j };
-          }
-        }
-      }
-      return { headerRowIndex: -1, tickerIdx: -1 };
-    }
-
-    // If no explicit header name, guess which column looks most like tickers
+    // Fallback: guess ticker column by pattern if header isn't clear
     function guessTickerColumn(lines, delimiter) {
       const maxScanLines = Math.min(lines.length, 30);
       let maxCols = 0;
       const splitLines = [];
-
       for (let i = 0; i < maxScanLines; i++) {
         const cols = lines[i].split(delimiter);
         splitLines.push(cols);
         if (cols.length > maxCols) maxCols = cols.length;
       }
-
       let bestCol = -1;
       let bestScore = -1;
-
       for (let col = 0; col < maxCols; col++) {
         let score = 0;
-        for (let i = 0; i < splitLines.length; i++) {
-          const cols = splitLines[i];
+        for (const cols of splitLines) {
           if (col >= cols.length) continue;
           const eq = normalizeEquityTicker(cols[col]);
           if (!eq) continue;
-
-          // Strong preference for typical equity length (<=5, letters only)
-          if (/^[A-Z]{1,5}$/.test(eq)) {
-            score += 3;
-          } else if (/^[A-Z]{1,4}\/[A-Z]$/.test(eq)) {
-            score += 2;
-          } else {
-            score += 1;
-          }
+          if (/^[A-Z]{1,5}$/.test(eq)) score += 3;
+          else if (/^[A-Z]{1,4}\/[A-Z]$/.test(eq)) score += 2;
+          else score += 1;
         }
         if (score > bestScore) {
           bestScore = score;
           bestCol = col;
         }
       }
-
-      if (bestScore <= 0) {
-        return { headerRowIndex: 0, tickerIdx: 0 }; // fallback
-      }
-
-      // Assume first line is header if we got here
+      if (bestScore <= 0) return { headerRowIndex: 0, tickerIdx: 0 };
       return { headerRowIndex: 0, tickerIdx: bestCol };
     }
 
-    // Parse CSV/TSV and return only equity (non-ETF) tickers
-    function parseCsvForEquities(text) {
+    // Parse xt_holdings-style CSV and return U.S. common stock tickers
+    function parseCsvForUSCommon(text) {
       const rawLines = text.split(/\r?\n/);
       const lines = rawLines.filter((l) => l.trim());
       if (!lines.length) return [];
 
       const delimiter = detectDelimiter(lines);
 
-      // First, try to find a header row with a ticker-like header
-      let { headerRowIndex, tickerIdx } = findHeaderAndTickerIndex(
-        lines,
-        delimiter
+      // Assume first non-empty line is header
+      const headerRowIndex = 0;
+      const headerCols = lines[headerRowIndex]
+        .split(delimiter)
+        .map((c) => c.trim());
+
+      let tickerIdx = headerCols.findIndex((h) =>
+        /(stock\s*ticker|ticker|symbol|underlying)/i.test(h)
       );
-
-      if (tickerIdx === -1) {
-        // No obvious header names – guess by equity pattern
-        const guess = guessTickerColumn(lines, delimiter);
-        headerRowIndex = guess.headerRowIndex;
-        tickerIdx = guess.tickerIdx;
+      if (tickerIdx < 0) {
+        // Fallback guessing
+        const g = guessTickerColumn(lines, delimiter);
+        tickerIdx = g.tickerIdx;
       }
 
-      // Try to find a name/description column on the header row (if any)
-      let nameIdx = -1;
-      if (headerRowIndex >= 0 && headerRowIndex < lines.length) {
-        const headerCols = lines[headerRowIndex]
-          .split(delimiter)
-          .map((c) => c.trim());
-        nameIdx = headerCols.findIndex((h) =>
-          /(name|description|security)/i.test(h)
-        );
-        if (nameIdx < 0) {
-          nameIdx = -1;
-        }
-      }
+      const nameIdx = headerCols.findIndex((h) =>
+        /(security\s*name|name|description)/i.test(h)
+      );
+      const mmIdx = headerCols.findIndex((h) =>
+        /(moneymarketflag|money\s*market|mmflag)/i.test(h)
+      );
+      const cusipIdx = headerCols.findIndex((h) =>
+        /cusip/i.test(h)
+      );
 
       const startRow = Math.min(headerRowIndex + 1, lines.length);
       const tickers = [];
@@ -428,12 +401,19 @@
         const rawTicker = cols[tickerIdx];
         const rawName =
           nameIdx >= 0 && nameIdx < cols.length ? cols[nameIdx] : "";
+        const rawMM =
+          mmIdx >= 0 && mmIdx < cols.length ? cols[mmIdx] : "";
+        const rawCusip =
+          cusipIdx >= 0 && cusipIdx < cols.length ? cols[cusipIdx] : "";
 
         const eqTicker = normalizeEquityTicker(rawTicker);
         if (!eqTicker) continue;
 
-        // If we have a name/description, use it to remove ETFs/funds
-        if (isLikelyETF(eqTicker, rawName)) continue;
+        // Drop non-equities (ETF, TRS, options, bonds, MMF, cash ...)
+        if (isLikelyNonEquity(eqTicker, rawName, rawMM, rawCusip)) continue;
+
+        // Additional: drop non-US / non-common
+        if (isLikelyNonUSCommon(eqTicker, rawName, rawCusip)) continue;
 
         tickers.push(eqTicker);
       }
@@ -455,7 +435,7 @@
         if (pf.error) {
           div.textContent = `${pf.name}: error – ${pf.error}`;
         } else {
-          div.textContent = `${pf.name}: ${pf.tickers.length} equity tickers`;
+          div.textContent = `${pf.name}: ${pf.tickers.length} U.S. common-stock tickers after filtering`;
         }
         fileSummaryEl.appendChild(div);
       });
@@ -480,7 +460,7 @@
         reader.onload = () => {
           try {
             const text = reader.result;
-            const tickers = parseCsvForEquities(text);
+            const tickers = parseCsvForUSCommon(text);
             parsedFiles.push({ name: file.name, tickers });
           } catch (e) {
             console.error(e);
@@ -495,12 +475,12 @@
               updateFileSummary();
               if (parsedFiles.some((pf) => pf.tickers.length > 0)) {
                 setStatus(
-                  "Files loaded. Click 'Aggregate tickers' to build the combined equity list.",
+                  "Files loaded. Click 'Aggregate U.S. common stocks' to build the combined list.",
                   "ok"
                 );
               } else {
                 setStatus(
-                  "Files loaded but no equity tickers detected – check the CSV format.",
+                  "Files loaded but no U.S. common stocks detected – check that the files are xt_holdings-style CSVs.",
                   "error"
                 );
               }
@@ -540,7 +520,7 @@
       const allTickers = parsedFiles.flatMap((pf) => pf.tickers || []);
       if (!allTickers.length) {
         setStatus(
-          "No equity tickers found in the loaded files.",
+          "No U.S. common stocks found in the loaded files.",
           "error"
         );
         return;
@@ -550,7 +530,7 @@
       commaOutputEl.value = unique.join(", ");
 
       setStatus(
-        `Aggregated ${unique.length} unique equity tickers from ${allTickers.length} total entries.`,
+        `Aggregated ${unique.length} unique U.S. common-stock tickers from ${allTickers.length} total rows after filtering.`,
         "ok"
       );
     });

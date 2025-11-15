@@ -140,16 +140,16 @@
   <div class="app">
     <h1>ETF Holdings Aggregator</h1>
     <p class="subtitle">
-      Upload one or more <code>xt_holdings</code>-style CSV files. This tool
-      extracts <strong>only U.S.-style common stocks</strong> as best it can:
-      it removes ETFs, swaps/options, bonds/T-bills, money market, cash, ADRs /
-      foreign listings, and keeps equity-like tickers that look like U.S.
-      common shares.
+      Upload <code>xt_holdings</code>-style CSVs and/or simple holdings files
+      (like <code>QMOM Holdings.csv</code>). This tool extracts
+      <strong>only U.S.-style common stocks</strong> and, for
+      <code>xt_holdings</code>, only keeps rows where
+      <strong>Account = BOUT or FFTY</strong>.
     </p>
 
     <!-- File upload -->
     <div>
-      <label for="filesInput">Holdings CSV files (xt_holdings)</label>
+      <label for="filesInput">Holdings CSV files</label>
       <input
         type="file"
         id="filesInput"
@@ -157,12 +157,11 @@
         multiple
       />
       <p class="small mt-4">
-        Expect columns like <code>Date, Account, StockTicker, CUSIP, SecurityName, MoneyMarketFlag</code>.
-        The app:
-        <br>• Reads <strong>StockTicker</strong> for the raw symbol
-        <br>• Uses <strong>SecurityName</strong> + <strong>MoneyMarketFlag</strong> + <strong>CUSIP</strong>
-        to drop ETFs, TRS/swaps, options, bonds/T-Bills, money market &amp; cash
-        <br>• Then tries to keep <strong>only U.S. common stocks</strong> (filters out ADRs / PLC / SA / NV / AG, etc.).
+        • For <code>xt_holdings.csv</code>: we use columns
+        <code>Account, StockTicker, CUSIP, SecurityName, MoneyMarketFlag</code>.<br />
+        &nbsp;&nbsp;Only rows with <strong>Account = BOUT or FFTY</strong> are kept.<br />
+        • For simple ETF holdings (e.g. QMOM): any CSV with a
+        <code>Ticker</code> / <code>Symbol</code> column works and all rows are used.
       </p>
 
       <div id="fileSummary" class="file-summary" style="display:none;"></div>
@@ -177,8 +176,8 @@
     <div class="mt-32">
       <h2 style="font-size:1.15rem; margin:0 0 8px;">Comma-separated U.S. stocks</h2>
       <p class="small" style="margin:0 0 8px;">
-        Unique U.S.-style common-stock tickers from all uploaded
-        <code>xt_holdings</code> files (sorted alphabetically, no quotes).
+        Unique U.S.-style common-stock tickers (BOUT + FFTY from xt_holdings,
+        plus any other uploaded holdings like QMOM), sorted alphabetically, no quotes.
       </p>
 
       <label for="commaOutput" style="margin-bottom:4px;">Output</label>
@@ -218,14 +217,12 @@
         (t.startsWith('"') && t.endsWith('"')) ||
         (t.startsWith("'") && t.endsWith("'"))
       ) {
-        t = t.slice(1, -1);
+        t = t.slice(1, -1).trim();
       }
-      t = t.trim();
       if (!t) return null;
 
       // Take only first token before whitespace (e.g. "AAPL TRS 0929" -> "AAPL")
-      let base = t.split(/\s+/)[0];
-      base = base.trim().toUpperCase();
+      let base = t.split(/\s+/)[0].trim().toUpperCase();
       if (!base) return null;
 
       const blacklistExact = new Set(["CASH", "OTHER", "CASH&OTHER", "NA"]);
@@ -287,20 +284,15 @@
     // Additional: filter to *U.S. common stocks* as best as possible
     function isLikelyNonUSCommon(ticker, name, cusip) {
       const n = (name || "").toUpperCase();
-      const c = (cusip || "").toUpperCase().trim();
 
       // ADRs / depositary receipts / foreign listing hints
       if (/\b(ADR|ADS|GDR|SP ADR|UNSPONSORED)\b/.test(n)) return true;
       if (/\b(ORDINARY|ORD SHS|ORD SHARES|ORD)\b/.test(n)) return true;
 
-      // Common non-US legal forms at end of name: PLC, SA, NV, AG, BV, OYJ, KK, etc.
+      // Common non-US legal forms at end of name: PLC, SA, NV, AG, BV, OYJ, etc.
       if (/\b(PLC|S\.?A\.?|N\.?V\.?|AG|BV|OYJ|S\.P\.A\.?|SPA)\b/.test(n)) {
         return true;
       }
-
-      // Heuristic via CUSIP:
-      // Non-US often still have US CUSIP, so we can't fully rely on this.
-      // We'll not hard-filter by CUSIP to avoid killing real US names.
 
       return false;
     }
@@ -358,7 +350,9 @@
       return { headerRowIndex: 0, tickerIdx: bestCol };
     }
 
-    // Parse xt_holdings-style CSV and return U.S. common stock tickers
+    // Parse CSV and return U.S. common stock tickers.
+    // If there is an Account column and it contains BOUT/FFTY, we keep ONLY those rows.
+    // If there is no Account column (e.g. QMOM Holdings), we use all rows.
     function parseCsvForUSCommon(text) {
       const rawLines = text.split(/\r?\n/);
       const lines = rawLines.filter((l) => l.trim());
@@ -390,6 +384,12 @@
       const cusipIdx = headerCols.findIndex((h) =>
         /cusip/i.test(h)
       );
+      const accountIdx = headerCols.findIndex((h) =>
+        /account/i.test(h)
+      );
+
+      const hasAccountColumn = accountIdx >= 0;
+      const allowedAccounts = new Set(["BOUT", "FFTY"]);
 
       const startRow = Math.min(headerRowIndex + 1, lines.length);
       const tickers = [];
@@ -397,6 +397,15 @@
       for (let i = startRow; i < lines.length; i++) {
         const cols = lines[i].split(delimiter);
         if (!cols.length || tickerIdx >= cols.length) continue;
+
+        // If this CSV has an Account column, only keep BOUT & FFTY
+        if (hasAccountColumn) {
+          const rawAccount = cols[accountIdx] || "";
+          const acct = rawAccount.toString().trim().toUpperCase();
+          if (!allowedAccounts.has(acct)) {
+            continue;
+          }
+        }
 
         const rawTicker = cols[tickerIdx];
         const rawName =
@@ -480,7 +489,7 @@
                 );
               } else {
                 setStatus(
-                  "Files loaded but no U.S. common stocks detected – check that the files are xt_holdings-style CSVs.",
+                  "Files loaded but no U.S. common stocks detected – check that the files are valid holdings CSVs.",
                   "error"
                 );
               }

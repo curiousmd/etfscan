@@ -141,8 +141,8 @@
     <h1>ETF Holdings Aggregator</h1>
     <p class="subtitle">
       Upload one or more CSV files downloaded from ETF websites (BOUT, FFTY,
-      QMOM, etc.). This tool will extract all tickers from those files and
-      aggregate them into a single comma-separated list.
+      QMOM, etc.). This tool will extract all tickers and aggregate them into a
+      single comma-separated list (no quotes).
     </p>
 
     <!-- File upload -->
@@ -155,10 +155,9 @@
         multiple
       />
       <p class="small mt-4">
-        You can select multiple files at once (for example, BOUT.csv, FFTY.csv,
-        QMOM.csv). The tool will try to detect the ticker column automatically
-        (prefers a header named <code>Ticker</code> or <code>Symbol</code>, otherwise
-        it uses the first column).
+        You can select multiple files at once (e.g., BOUT.csv, FFTY.csv,
+        QMOM.csv). The tool auto-detects the ticker column (looks for headers like
+        <code>Ticker</code>/<code>Symbol</code>, otherwise guesses by pattern).
       </p>
 
       <div id="fileSummary" class="file-summary" style="display:none;"></div>
@@ -173,11 +172,11 @@
     <div class="mt-32">
       <h2 style="font-size:1.15rem; margin:0 0 8px;">Comma-separated tickers</h2>
       <p class="small" style="margin:0 0 8px;">
-        Unique tickers from all uploaded files (sorted alphabetically).
+        Unique tickers from all uploaded files (sorted alphabetically, no quotes).
       </p>
 
       <label for="commaOutput" style="margin-bottom:4px;">Output</label>
-      <textarea id="commaOutput" placeholder="AAPL, MSFT, ..."></textarea>
+      <textarea id="commaOutput" placeholder="AAPL, MSFT, NVDA, ..."></textarea>
 
       <div class="mt-8">
         <button id="copyBtn" class="secondary">
@@ -205,46 +204,143 @@
 
     function sanitizeTicker(raw) {
       if (!raw) return null;
-      const t = String(raw).trim().toUpperCase();
+      let t = String(raw).trim();
       if (!t) return null;
-      // Require at least one letter A–Z to avoid pure numbers/junk
+
+      // Strip wrapping quotes if present
+      if (
+        (t.startsWith('"') && t.endsWith('"')) ||
+        (t.startsWith("'") && t.endsWith("'"))
+      ) {
+        t = t.slice(1, -1);
+      }
+
+      t = t.trim().toUpperCase();
+      if (!t) return null;
+
+      // Require at least one A–Z letter to avoid pure numbers/junk
       if (!/[A-Z]/.test(t)) return null;
+
       return t;
     }
 
-    // Simple CSV/TSV parser that:
-    // - Detects delimiter (comma, semicolon, or tab)
-    // - Looks for a header with "Ticker" or "Symbol"
-    // - Falls back to first column if nothing matches
+    // Detect delimiter by counting commas/semicolons/tabs in the first few lines
+    function detectDelimiter(lines) {
+      const candidates = [",", ";", "\t"];
+      const scores = { ",": 0, ";": 0, "\t": 0 };
+
+      const sampleLines = lines.slice(0, Math.min(lines.length, 10));
+      for (const line of sampleLines) {
+        for (const d of candidates) {
+          const c = (line.match(new RegExp(`\\${d}`, "g")) || []).length;
+          scores[d] += c;
+        }
+      }
+
+      let bestDelim = ",";
+      let bestScore = -1;
+      for (const d of candidates) {
+        if (scores[d] > bestScore) {
+          bestScore = scores[d];
+          bestDelim = d;
+        }
+      }
+      return bestDelim;
+    }
+
+    // Try to find a header row and ticker column index by header name
+    function findHeaderAndTickerIndex(lines, delimiter) {
+      const maxHeaderScan = Math.min(lines.length, 15);
+      const headerPatterns = /(ticker|symbol|underlying)/i;
+
+      for (let i = 0; i < maxHeaderScan; i++) {
+        const cols = lines[i].split(delimiter).map((c) => c.trim());
+        for (let j = 0; j < cols.length; j++) {
+          if (headerPatterns.test(cols[j])) {
+            return { headerRowIndex: i, tickerIdx: j };
+          }
+        }
+      }
+      return { headerRowIndex: -1, tickerIdx: -1 };
+    }
+
+    // If no explicit header name, guess which column looks most like tickers
+    function guessTickerColumn(lines, delimiter) {
+      const maxScanLines = Math.min(lines.length, 30);
+      let maxCols = 0;
+      const splitLines = [];
+
+      for (let i = 0; i < maxScanLines; i++) {
+        const cols = lines[i].split(delimiter);
+        splitLines.push(cols);
+        if (cols.length > maxCols) maxCols = cols.length;
+      }
+
+      let bestCol = -1;
+      let bestScore = -1;
+
+      for (let col = 0; col < maxCols; col++) {
+        let score = 0;
+        for (let i = 0; i < splitLines.length; i++) {
+          const cols = splitLines[i];
+          if (col >= cols.length) continue;
+          const t = sanitizeTicker(cols[col]);
+          if (!t) continue;
+
+          // Strong preference for "typical" ticker shapes
+          if (/^[A-Z]{1,6}$/.test(t)) {
+            score += 3;
+          } else if (/^[A-Z0-9.\-]{1,8}$/.test(t) && !/\s/.test(t)) {
+            score += 2;
+          } else {
+            score += 1;
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestCol = col;
+        }
+      }
+
+      if (bestScore <= 0) {
+        return { headerRowIndex: 0, tickerIdx: 0 }; // last-resort fallback
+      }
+
+      // Assume first line is header if we got here
+      return { headerRowIndex: 0, tickerIdx: bestCol };
+    }
+
+    // Robust CSV/TSV parser for tickers
     function parseCsvForTickers(text) {
-      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      const rawLines = text.split(/\r?\n/);
+      const lines = rawLines.filter((l) => l.trim());
       if (!lines.length) return [];
 
-      // Detect delimiter using header line
-      const headerLine = lines[0];
-      let delimiter = ",";
-      if (headerLine.indexOf("\t") !== -1) {
-        delimiter = "\t";
-      } else if (headerLine.indexOf(";") !== -1) {
-        delimiter = ";";
-      }
+      const delimiter = detectDelimiter(lines);
 
-      const header = headerLine.split(delimiter).map((h) => h.trim());
-      let tickerIdx = header.findIndex((h) =>
-        /^(ticker|symbol)$/i.test(h)
+      // First, try to find a header row with a ticker-like header
+      let { headerRowIndex, tickerIdx } = findHeaderAndTickerIndex(
+        lines,
+        delimiter
       );
+
       if (tickerIdx === -1) {
-        // Fallback: first column
-        tickerIdx = 0;
+        // No obvious header names – guess by ticker pattern
+        const guess = guessTickerColumn(lines, delimiter);
+        headerRowIndex = guess.headerRowIndex;
+        tickerIdx = guess.tickerIdx;
       }
 
+      const startRow = Math.min(headerRowIndex + 1, lines.length);
       const tickers = [];
-      for (let i = 1; i < lines.length; i++) {
+
+      for (let i = startRow; i < lines.length; i++) {
         const cols = lines[i].split(delimiter);
-        if (!cols.length) continue;
+        if (!cols.length || tickerIdx >= cols.length) continue;
         const t = sanitizeTicker(cols[tickerIdx]);
         if (t) tickers.push(t);
       }
+
       return tickers;
     }
 
@@ -259,7 +355,11 @@
       parsedFiles.forEach((pf) => {
         const div = document.createElement("div");
         div.className = "file-summary-item";
-        div.textContent = `${pf.name}: ${pf.tickers.length} tickers`;
+        if (pf.error) {
+          div.textContent = `${pf.name}: error – ${pf.error}`;
+        } else {
+          div.textContent = `${pf.name}: ${pf.tickers.length} tickers`;
+        }
         fileSummaryEl.appendChild(div);
       });
     }
@@ -295,12 +395,18 @@
           } finally {
             remaining--;
             if (remaining === 0) {
-              // All files processed
               updateFileSummary();
-              setStatus(
-                "Files loaded. Click 'Aggregate tickers' to build the combined list.",
-                "ok"
-              );
+              if (parsedFiles.some((pf) => pf.tickers.length > 0)) {
+                setStatus(
+                  "Files loaded. Click 'Aggregate tickers' to build the combined list.",
+                  "ok"
+                );
+              } else {
+                setStatus(
+                  "Files loaded but no tickers detected – check the CSV format.",
+                  "error"
+                );
+              }
             }
           }
         };
@@ -344,6 +450,7 @@
       }
 
       const unique = Array.from(new Set(allTickers)).sort();
+      // Join directly – tickers are already cleaned and have no wrapping quotes
       commaOutputEl.value = unique.join(", ");
 
       setStatus(

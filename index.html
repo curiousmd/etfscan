@@ -34,39 +34,23 @@
       color: #6b7280;
       font-size: 0.95rem;
     }
-    label {
-      display: block;
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin-bottom: 6px;
+    .small {
+      font-size: 0.8rem;
+      color: #6b7280;
     }
-    textarea {
-      width: 100%;
-      border-radius: 10px;
-      border: 1px solid #d1d5db;
-      padding: 10px 12px;
-      font-size: 0.95rem;
-      box-sizing: border-box;
-      outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s;
-      background: #f9fafb;
-      min-height: 80px;
-      resize: vertical;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-        "Liberation Mono", "Courier New", monospace;
-    }
-    textarea:focus {
-      border-color: #4f46e5;
-      box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.4);
-      background: #ffffff;
-    }
+    .mt-4 { margin-top: 4px; }
+    .mt-8 { margin-top: 8px; }
+    .mt-16 { margin-top: 16px; }
+    .mt-24 { margin-top: 24px; }
+    .mt-32 { margin-top: 32px; }
+
     .row {
       display: flex;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 10px;
       align-items: center;
-      margin-top: 8px;
     }
+
     button {
       border-radius: 999px;
       border: none;
@@ -99,14 +83,7 @@
       box-shadow: none;
       transform: none;
     }
-    .mt-8 { margin-top: 8px; }
-    .mt-16 { margin-top: 16px; }
-    .mt-24 { margin-top: 24px; }
-    .mt-32 { margin-top: 32px; }
-    .small {
-      font-size: 0.8rem;
-      color: #6b7280;
-    }
+
     .pill {
       display: inline-flex;
       align-items: center;
@@ -118,6 +95,7 @@
       font-size: 0.78rem;
       font-weight: 600;
     }
+
     .status {
       margin-top: 6px;
       font-size: 0.83rem;
@@ -128,6 +106,7 @@
     .status.ok {
       color: #15803d;
     }
+
     .card-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -163,6 +142,27 @@
       white-space: normal;
       word-wrap: break-word;
     }
+
+    textarea {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+      padding: 10px 12px;
+      font-size: 0.9rem;
+      box-sizing: border-box;
+      min-height: 80px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+      background: #f9fafb;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.4);
+      background: #ffffff;
+    }
+
     @media (max-width: 640px) {
       .app {
         padding: 18px 14px 24px;
@@ -176,9 +176,9 @@
   <div class="app">
     <h1>ETF Holdings Aggregator</h1>
     <p class="subtitle">
-      Fetch daily holdings for <strong>BOUT</strong>, <strong>FFTY</strong> and
-      <strong>QMOM</strong>, then aggregate tickers into a single
-      comma-separated list for copy/paste.
+      Fetch holdings for <strong>BOUT</strong>, <strong>FFTY</strong> and
+      <strong>QMOM</strong> from Financial Modeling Prep, then aggregate all
+      tickers into a single comma-separated list.
     </p>
 
     <!-- Controls -->
@@ -188,28 +188,30 @@
           🔄 Fetch holdings
         </button>
         <span class="pill">
-          Tracking: BOUT, FFTY, QMOM
+          Source: financialmodelingprep.com/api/v3/etf-holder
         </span>
       </div>
 
       <div id="status" class="status"></div>
       <div id="lastUpdated" class="status small"></div>
+
       <p class="small mt-8">
-        API key is hard-coded in the file. For security, only use this on your own
-        machine and don’t share this HTML with your real key inside.
+        The API key is hard-coded in this file. Use this only for personal/local
+        use and avoid sharing the file with your real key.
       </p>
     </div>
 
-    <!-- Per-ETF breakdown -->
+    <!-- Per-ETF holdings -->
     <div class="mt-32">
       <h2 style="font-size:1.15rem; margin:0 0 8px;">Per-ETF holdings</h2>
       <p class="small" style="margin:0 0 12px;">
-        The tickers below come directly from the latest ETF holdings data.
+        Each card shows the tickers returned for that ETF by
+        <code>/api/v3/etf-holder/&lt;symbol&gt;</code>. 
       </p>
       <div id="etfCards" class="card-grid"></div>
     </div>
 
-    <!-- Aggregated output -->
+    <!-- Aggregated tickers -->
     <div class="mt-32">
       <h2 style="font-size:1.15rem; margin:0 0 8px;">Aggregated tickers</h2>
       <p class="small" style="margin:0 0 8px;">
@@ -217,24 +219,28 @@
       </p>
 
       <label for="commaOutput" style="margin-bottom:4px;">
-        Comma-separated
+        Comma-separated list
       </label>
       <textarea id="commaOutput" placeholder="AAPL, MSFT, ..."></textarea>
 
       <div class="row mt-8">
         <button id="copyCommaBtn" class="secondary">
-          📋 Copy comma-separated list
+          📋 Copy comma-separated tickers
         </button>
       </div>
     </div>
   </div>
 
   <script>
-    // 🔑 Put your Finnhub API key here:
-    const FINNHUB_API_KEY = "d4bsh5pr01qoua31bj4gd4bsh5pr01qoua31bj50";
+    // 🔑 1) Put your Financial Modeling Prep API key here
+    // Get one at https://site.financialmodelingprep.com/developer/docs
+    const FMP_API_KEY = "k36pkMBWkyE3Q7iHwnUz7G9rSbTCqcMv";
 
+    // ETFs we want to track
     const ETF_SYMBOLS = ["BOUT", "FFTY", "QMOM"];
-    const FETCH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h auto-refresh
+
+    // Auto-refresh once a day (optional)
+    const FETCH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
 
     const statusEl = document.getElementById("status");
     const lastUpdatedEl = document.getElementById("lastUpdated");
@@ -260,31 +266,37 @@
       if (!raw) return null;
       const t = String(raw).trim().toUpperCase();
       if (!t) return null;
-      if (!/[A-Z]/.test(t)) return null; // basic filter
+      // require at least one A–Z letter to avoid junk
+      if (!/[A-Z]/.test(t)) return null;
       return t;
     }
 
-    async function fetchHoldingsForETF(etfSymbol, apiKey) {
+    // Fetch holdings for a single ETF from FMP
+    async function fetchHoldingsForETF(etfSymbol) {
+      if (!FMP_API_KEY || FMP_API_KEY === "YOUR_FMP_API_KEY_HERE") {
+        throw new Error(
+          "FMP_API_KEY is not set. Edit the file and set your real API key."
+        );
+      }
+
+      const baseUrl = "https://financialmodelingprep.com/api/v3/etf-holder/";
       const url =
-        "https://finnhub.io/api/v1/etf/holdings?symbol=" +
+        baseUrl +
         encodeURIComponent(etfSymbol) +
-        "&token=" +
-        encodeURIComponent(apiKey);
+        "?apikey=" +
+        encodeURIComponent(FMP_API_KEY);
 
       const res = await fetch(url);
       if (!res.ok) {
-        throw new Error(
-          etfSymbol + ": HTTP " + res.status + " " + res.statusText
-        );
+        throw new Error(etfSymbol + ": HTTP " + res.status + " " + res.statusText);
       }
+
+      // Expected response: array of objects with "asset", "name", ...
+      // See docs: /api/v3/etf-holder/SPY. 
       const data = await res.json();
 
-      const rawHoldings = Array.isArray(data.holdings)
-        ? data.holdings
-        : [];
-
-      const tickers = rawHoldings
-        .map((h) => sanitizeTicker(h.symbol || h.ticker || h.code))
+      const tickers = (Array.isArray(data) ? data : [])
+        .map((item) => sanitizeTicker(item.asset))
         .filter(Boolean);
 
       return {
@@ -335,27 +347,19 @@
     }
 
     async function fetchAllHoldings() {
-      if (!FINNHUB_API_KEY || FINNHUB_API_KEY === "YOUR_FINNHUB_API_KEY_HERE") {
-        setStatus(
-          "Please edit the file and set FINNHUB_API_KEY to your real key.",
-          "error"
-        );
-        return;
-      }
-
       fetchBtn.disabled = true;
       copyCommaBtn.disabled = true;
       setStatus("Fetching holdings for BOUT, FFTY, QMOM...", "");
       setLastUpdated(null);
 
       try {
-        const promises = ETF_SYMBOLS.map((sym) =>
-          fetchHoldingsForETF(sym, FINNHUB_API_KEY)
-        );
+        const promises = ETF_SYMBOLS.map((sym) => fetchHoldingsForETF(sym));
         const results = await Promise.all(promises);
 
+        // Show per-ETF breakdown
         renderEtfCards(results);
 
+        // Aggregate across all ETFs
         const aggregated = aggregateTickers(results);
         commaOutputEl.value = aggregated.join(", ");
 
@@ -378,24 +382,16 @@
     async function copyCommaSeparated() {
       const text = commaOutputEl.value.trim();
       if (!text) {
-        setStatus(
-          "Nothing to copy yet – fetch holdings first.",
-          "error"
-        );
+        setStatus("Nothing to copy yet – fetch holdings first.", "error");
         return;
       }
+
       try {
         await navigator.clipboard.writeText(text);
-        setStatus(
-          "Comma-separated tickers copied to clipboard ✅",
-          "ok"
-        );
+        setStatus("Comma-separated tickers copied to clipboard ✅", "ok");
       } catch (err) {
         console.error(err);
-        setStatus(
-          "Could not copy to clipboard (browser blocked it).",
-          "error"
-        );
+        setStatus("Could not copy to clipboard (browser blocked it).", "error");
       }
     }
 

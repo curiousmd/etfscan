@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ETF Holdings Aggregator (BOUT / FFTY / QMOM)</title>
+  <title>ETF Holdings Aggregator – CSV Upload</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -19,7 +19,7 @@
     }
     .app {
       width: 100%;
-      max-width: 960px;
+      max-width: 900px;
       background: #ffffff;
       border-radius: 18px;
       padding: 24px 24px 32px;
@@ -30,7 +30,7 @@
       font-size: 1.6rem;
     }
     .subtitle {
-      margin: 0 0 24px;
+      margin: 0 0 20px;
       color: #6b7280;
       font-size: 0.95rem;
     }
@@ -44,11 +44,15 @@
     .mt-24 { margin-top: 24px; }
     .mt-32 { margin-top: 32px; }
 
-    .row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
+    label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input[type="file"] {
+      font-size: 0.9rem;
     }
 
     button {
@@ -84,65 +88,6 @@
       transform: none;
     }
 
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: #eef2ff;
-      color: #3730a3;
-      font-size: 0.78rem;
-      font-weight: 600;
-    }
-
-    .status {
-      margin-top: 6px;
-      font-size: 0.83rem;
-    }
-    .status.error {
-      color: #b91c1c;
-    }
-    .status.ok {
-      color: #15803d;
-    }
-
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 16px;
-    }
-    .card {
-      border-radius: 14px;
-      border: 1px solid #e5e7eb;
-      padding: 14px 14px 16px;
-      background: #f9fafb;
-    }
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 6px;
-    }
-    .card-title {
-      font-size: 0.95rem;
-      font-weight: 700;
-    }
-    .card-sub {
-      font-size: 0.78rem;
-      color: #6b7280;
-    }
-    .ticker-list {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-        "Liberation Mono", "Courier New", monospace;
-      font-size: 0.78rem;
-      line-height: 1.5;
-      max-height: 150px;
-      overflow-y: auto;
-      white-space: normal;
-      word-wrap: break-word;
-    }
-
     textarea {
       width: 100%;
       border-radius: 10px;
@@ -163,6 +108,25 @@
       background: #ffffff;
     }
 
+    .status {
+      margin-top: 6px;
+      font-size: 0.83rem;
+    }
+    .status.error { color: #b91c1c; }
+    .status.ok { color: #15803d; }
+
+    .file-summary {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      font-size: 0.8rem;
+    }
+    .file-summary-item {
+      margin-bottom: 4px;
+    }
+
     @media (max-width: 640px) {
       .app {
         padding: 18px 14px 24px;
@@ -176,55 +140,47 @@
   <div class="app">
     <h1>ETF Holdings Aggregator</h1>
     <p class="subtitle">
-      Fetch holdings for <strong>BOUT</strong>, <strong>FFTY</strong> and
-      <strong>QMOM</strong> from Financial Modeling Prep, then aggregate all
-      tickers into a single comma-separated list.
+      Upload one or more CSV files downloaded from ETF websites (BOUT, FFTY,
+      QMOM, etc.). This tool will extract all tickers from those files and
+      aggregate them into a single comma-separated list.
     </p>
 
-    <!-- Controls -->
+    <!-- File upload -->
     <div>
-      <div class="row mt-8">
-        <button id="fetchBtn" class="primary">
-          🔄 Fetch holdings
-        </button>
-        <span class="pill">
-          Source: financialmodelingprep.com/api/v3/etf-holder
-        </span>
+      <label for="filesInput">Holdings CSV files</label>
+      <input
+        type="file"
+        id="filesInput"
+        accept=".csv,.txt"
+        multiple
+      />
+      <p class="small mt-4">
+        You can select multiple files at once (for example, BOUT.csv, FFTY.csv,
+        QMOM.csv). The tool will try to detect the ticker column automatically
+        (prefers a header named <code>Ticker</code> or <code>Symbol</code>, otherwise
+        it uses the first column).
+      </p>
+
+      <div id="fileSummary" class="file-summary" style="display:none;"></div>
+
+      <div class="mt-16">
+        <button id="aggregateBtn" class="primary">🔄 Aggregate tickers</button>
+        <span id="status" class="status"></span>
       </div>
-
-      <div id="status" class="status"></div>
-      <div id="lastUpdated" class="status small"></div>
-
-      <p class="small mt-8">
-        The API key is hard-coded in this file. Use this only for personal/local
-        use and avoid sharing the file with your real key.
-      </p>
     </div>
 
-    <!-- Per-ETF holdings -->
+    <!-- Output -->
     <div class="mt-32">
-      <h2 style="font-size:1.15rem; margin:0 0 8px;">Per-ETF holdings</h2>
-      <p class="small" style="margin:0 0 12px;">
-        Each card shows the tickers returned for that ETF by
-        <code>/api/v3/etf-holder/&lt;symbol&gt;</code>. 
-      </p>
-      <div id="etfCards" class="card-grid"></div>
-    </div>
-
-    <!-- Aggregated tickers -->
-    <div class="mt-32">
-      <h2 style="font-size:1.15rem; margin:0 0 8px;">Aggregated tickers</h2>
+      <h2 style="font-size:1.15rem; margin:0 0 8px;">Comma-separated tickers</h2>
       <p class="small" style="margin:0 0 8px;">
-        Unique tickers across BOUT + FFTY + QMOM (sorted alphabetically).
+        Unique tickers from all uploaded files (sorted alphabetically).
       </p>
 
-      <label for="commaOutput" style="margin-bottom:4px;">
-        Comma-separated list
-      </label>
+      <label for="commaOutput" style="margin-bottom:4px;">Output</label>
       <textarea id="commaOutput" placeholder="AAPL, MSFT, ..."></textarea>
 
-      <div class="row mt-8">
-        <button id="copyCommaBtn" class="secondary">
+      <div class="mt-8">
+        <button id="copyBtn" class="secondary">
           📋 Copy comma-separated tickers
         </button>
       </div>
@@ -232,177 +188,184 @@
   </div>
 
   <script>
-    // 🔑 1) Put your Financial Modeling Prep API key here
-    // Get one at https://site.financialmodelingprep.com/developer/docs
-    const FMP_API_KEY = "k36pkMBWkyE3Q7iHwnUz7G9rSbTCqcMv";
-
-    // ETFs we want to track
-    const ETF_SYMBOLS = ["BOUT", "FFTY", "QMOM"];
-
-    // Auto-refresh once a day (optional)
-    const FETCH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
-
+    const filesInput = document.getElementById("filesInput");
+    const aggregateBtn = document.getElementById("aggregateBtn");
+    const copyBtn = document.getElementById("copyBtn");
     const statusEl = document.getElementById("status");
-    const lastUpdatedEl = document.getElementById("lastUpdated");
-    const etfCardsEl = document.getElementById("etfCards");
+    const fileSummaryEl = document.getElementById("fileSummary");
     const commaOutputEl = document.getElementById("commaOutput");
-    const fetchBtn = document.getElementById("fetchBtn");
-    const copyCommaBtn = document.getElementById("copyCommaBtn");
 
-    function setStatus(message, type = "") {
-      statusEl.textContent = message || "";
+    // Store parsed tickers per file
+    let parsedFiles = [];
+
+    function setStatus(msg, type = "") {
+      statusEl.textContent = msg || "";
       statusEl.className = "status" + (type ? " " + type : "");
-    }
-
-    function setLastUpdated(date) {
-      if (!date) {
-        lastUpdatedEl.textContent = "";
-        return;
-      }
-      lastUpdatedEl.textContent = "Last updated: " + date.toLocaleString();
     }
 
     function sanitizeTicker(raw) {
       if (!raw) return null;
       const t = String(raw).trim().toUpperCase();
       if (!t) return null;
-      // require at least one A–Z letter to avoid junk
+      // Require at least one letter A–Z to avoid pure numbers/junk
       if (!/[A-Z]/.test(t)) return null;
       return t;
     }
 
-    // Fetch holdings for a single ETF from FMP
-    async function fetchHoldingsForETF(etfSymbol) {
-      if (!FMP_API_KEY || FMP_API_KEY === "YOUR_FMP_API_KEY_HERE") {
-        throw new Error(
-          "FMP_API_KEY is not set. Edit the file and set your real API key."
-        );
+    // Simple CSV/TSV parser that:
+    // - Detects delimiter (comma, semicolon, or tab)
+    // - Looks for a header with "Ticker" or "Symbol"
+    // - Falls back to first column if nothing matches
+    function parseCsvForTickers(text) {
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (!lines.length) return [];
+
+      // Detect delimiter using header line
+      const headerLine = lines[0];
+      let delimiter = ",";
+      if (headerLine.indexOf("\t") !== -1) {
+        delimiter = "\t";
+      } else if (headerLine.indexOf(";") !== -1) {
+        delimiter = ";";
       }
 
-      const baseUrl = "https://financialmodelingprep.com/api/v3/etf-holder/";
-      const url =
-        baseUrl +
-        encodeURIComponent(etfSymbol) +
-        "?apikey=" +
-        encodeURIComponent(FMP_API_KEY);
-
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(etfSymbol + ": HTTP " + res.status + " " + res.statusText);
+      const header = headerLine.split(delimiter).map((h) => h.trim());
+      let tickerIdx = header.findIndex((h) =>
+        /^(ticker|symbol)$/i.test(h)
+      );
+      if (tickerIdx === -1) {
+        // Fallback: first column
+        tickerIdx = 0;
       }
 
-      // Expected response: array of objects with "asset", "name", ...
-      // See docs: /api/v3/etf-holder/SPY. 
-      const data = await res.json();
-
-      const tickers = (Array.isArray(data) ? data : [])
-        .map((item) => sanitizeTicker(item.asset))
-        .filter(Boolean);
-
-      return {
-        etf: etfSymbol,
-        tickers,
-        count: tickers.length,
-      };
+      const tickers = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(delimiter);
+        if (!cols.length) continue;
+        const t = sanitizeTicker(cols[tickerIdx]);
+        if (t) tickers.push(t);
+      }
+      return tickers;
     }
 
-    function renderEtfCards(results) {
-      etfCardsEl.innerHTML = "";
-      if (!results || !results.length) return;
-
-      results.forEach((r) => {
-        const card = document.createElement("div");
-        card.className = "card";
-
-        const header = document.createElement("div");
-        header.className = "card-header";
-
-        const title = document.createElement("div");
-        title.className = "card-title";
-        title.textContent = r.etf;
-
-        const sub = document.createElement("div");
-        sub.className = "card-sub";
-        sub.textContent = r.count + " tickers";
-
-        header.appendChild(title);
-        header.appendChild(sub);
-
-        const list = document.createElement("div");
-        list.className = "ticker-list";
-        list.textContent = r.tickers.join(", ");
-
-        card.appendChild(header);
-        card.appendChild(list);
-        etfCardsEl.appendChild(card);
+    function updateFileSummary() {
+      if (!parsedFiles.length) {
+        fileSummaryEl.style.display = "none";
+        fileSummaryEl.innerHTML = "";
+        return;
+      }
+      fileSummaryEl.style.display = "block";
+      fileSummaryEl.innerHTML = "";
+      parsedFiles.forEach((pf) => {
+        const div = document.createElement("div");
+        div.className = "file-summary-item";
+        div.textContent = `${pf.name}: ${pf.tickers.length} tickers`;
+        fileSummaryEl.appendChild(div);
       });
     }
 
-    function aggregateTickers(results) {
-      const set = new Set();
-      results.forEach((r) => {
-        r.tickers.forEach((t) => set.add(t));
-      });
-      return Array.from(set).sort();
-    }
+    function readAllFiles(files) {
+      parsedFiles = [];
+      setStatus("", "");
+      commaOutputEl.value = "";
+      fileSummaryEl.style.display = "none";
+      fileSummaryEl.innerHTML = "";
 
-    async function fetchAllHoldings() {
-      fetchBtn.disabled = true;
-      copyCommaBtn.disabled = true;
-      setStatus("Fetching holdings for BOUT, FFTY, QMOM...", "");
-      setLastUpdated(null);
-
-      try {
-        const promises = ETF_SYMBOLS.map((sym) => fetchHoldingsForETF(sym));
-        const results = await Promise.all(promises);
-
-        // Show per-ETF breakdown
-        renderEtfCards(results);
-
-        // Aggregate across all ETFs
-        const aggregated = aggregateTickers(results);
-        commaOutputEl.value = aggregated.join(", ");
-
-        setStatus(
-          "Holdings fetched successfully. Aggregated " +
-            aggregated.length +
-            " unique tickers.",
-          "ok"
-        );
-        setLastUpdated(new Date());
-        copyCommaBtn.disabled = false;
-      } catch (err) {
-        console.error(err);
-        setStatus("Error fetching holdings: " + err.message, "error");
-      } finally {
-        fetchBtn.disabled = false;
-      }
-    }
-
-    async function copyCommaSeparated() {
-      const text = commaOutputEl.value.trim();
-      if (!text) {
-        setStatus("Nothing to copy yet – fetch holdings first.", "error");
+      if (!files || !files.length) {
+        setStatus("No files selected yet.", "error");
         return;
       }
 
-      try {
-        await navigator.clipboard.writeText(text);
-        setStatus("Comma-separated tickers copied to clipboard ✅", "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus("Could not copy to clipboard (browser blocked it).", "error");
-      }
+      let remaining = files.length;
+
+      Array.from(files).forEach((file) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const text = reader.result;
+            const tickers = parseCsvForTickers(text);
+            parsedFiles.push({ name: file.name, tickers });
+          } catch (e) {
+            console.error(e);
+            parsedFiles.push({
+              name: file.name,
+              tickers: [],
+              error: e.message,
+            });
+          } finally {
+            remaining--;
+            if (remaining === 0) {
+              // All files processed
+              updateFileSummary();
+              setStatus(
+                "Files loaded. Click 'Aggregate tickers' to build the combined list.",
+                "ok"
+              );
+            }
+          }
+        };
+        reader.onerror = () => {
+          console.error("Error reading file:", file.name);
+          parsedFiles.push({
+            name: file.name,
+            tickers: [],
+            error: "Failed to read file",
+          });
+          remaining--;
+          if (remaining === 0) {
+            updateFileSummary();
+            setStatus(
+              "Some files could not be read. Check the summary above.",
+              "error"
+            );
+          }
+        };
+        reader.readAsText(file);
+      });
     }
 
-    // Event listeners
-    fetchBtn.addEventListener("click", fetchAllHoldings);
-    copyCommaBtn.addEventListener("click", copyCommaSeparated);
+    filesInput.addEventListener("change", (e) => {
+      readAllFiles(e.target.files);
+    });
 
-    // Optional: auto-refresh once per day while the page is open
-    setInterval(() => {
-      fetchAllHoldings();
-    }, FETCH_INTERVAL_MS);
+    aggregateBtn.addEventListener("click", () => {
+      if (!parsedFiles.length) {
+        setStatus("No files loaded – select CSV files first.", "error");
+        return;
+      }
+
+      const allTickers = parsedFiles.flatMap((pf) => pf.tickers || []);
+      if (!allTickers.length) {
+        setStatus(
+          "No tickers found in the loaded files (check headers/format).",
+          "error"
+        );
+        return;
+      }
+
+      const unique = Array.from(new Set(allTickers)).sort();
+      commaOutputEl.value = unique.join(", ");
+
+      setStatus(
+        `Aggregated ${unique.length} unique tickers from ${allTickers.length} total entries.`,
+        "ok"
+      );
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      const text = commaOutputEl.value.trim();
+      if (!text) {
+        setStatus("Nothing to copy yet.", "error");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("Tickers copied to clipboard ✅", "ok");
+      } catch (e) {
+        console.error(e);
+        setStatus("Clipboard copy failed (browser blocked it).", "error");
+      }
+    });
   </script>
 </body>
 </html>

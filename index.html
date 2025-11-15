@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ETF Holdings Aggregator – CSV Upload</title>
+  <title>ETF Holdings Aggregator – Equities Only</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -141,8 +141,9 @@
     <h1>ETF Holdings Aggregator</h1>
     <p class="subtitle">
       Upload one or more CSV files downloaded from ETF websites (BOUT, FFTY,
-      QMOM, etc.). This tool will extract all tickers and aggregate them into a
-      single comma-separated list (no quotes).
+      QMOM, etc.). This tool extracts <strong>only stock (equity) tickers</strong>
+      and aggregates them into a single comma-separated list (no ETFs, no options,
+      no CUSIPs, no quotes).
     </p>
 
     <!-- File upload -->
@@ -156,8 +157,9 @@
       />
       <p class="small mt-4">
         You can select multiple files at once (e.g., BOUT.csv, FFTY.csv,
-        QMOM.csv). The tool auto-detects the ticker column (looks for headers like
-        <code>Ticker</code>/<code>Symbol</code>, otherwise guesses by pattern).
+        QMOM.csv). The tool auto-detects the ticker column and a name/description
+        column. It then keeps only stock-like tickers whose security name does
+        <strong>not</strong> look like an ETF or fund.
       </p>
 
       <div id="fileSummary" class="file-summary" style="display:none;"></div>
@@ -172,7 +174,7 @@
     <div class="mt-32">
       <h2 style="font-size:1.15rem; margin:0 0 8px;">Comma-separated tickers</h2>
       <p class="small" style="margin:0 0 8px;">
-        Unique tickers from all uploaded files (sorted alphabetically, no quotes).
+        Unique equity tickers from all uploaded files (sorted alphabetically, no quotes, ETFs removed).
       </p>
 
       <label for="commaOutput" style="margin-bottom:4px;">Output</label>
@@ -202,12 +204,13 @@
       statusEl.className = "status" + (type ? " " + type : "");
     }
 
-    function sanitizeTicker(raw) {
+    // Decide if a ticker string is a stock-like ticker (pattern only)
+    function normalizeEquityTicker(raw) {
       if (!raw) return null;
       let t = String(raw).trim();
       if (!t) return null;
 
-      // Strip wrapping quotes if present
+      // Strip wrapping quotes
       if (
         (t.startsWith('"') && t.endsWith('"')) ||
         (t.startsWith("'") && t.endsWith("'"))
@@ -215,13 +218,83 @@
         t = t.slice(1, -1);
       }
 
-      t = t.trim().toUpperCase();
+      t = t.trim();
       if (!t) return null;
 
-      // Require at least one A–Z letter to avoid pure numbers/junk
-      if (!/[A-Z]/.test(t)) return null;
+      // Take only the first token before whitespace
+      let base = t.split(/\s+/)[0];
+      base = base.trim().toUpperCase();
+      if (!base) return null;
 
-      return t;
+      // Filter out obvious non-tickers
+      const blacklistExact = new Set([
+        "CASH",
+        "OTHER",
+        "CASH&OTHER",
+        "NA"
+      ]);
+      if (blacklistExact.has(base)) return null;
+      if (base.includes("&")) return null; // anything like CASH&OTHER
+
+      // Share-class symbols with slash (e.g. BRK/B, HEI/A, CWEN/A)
+      const shareClassSlash = /^[A-Z]{1,4}\/[A-Z]$/;
+      // Simple equity ticker: 1–5 letters, no digits
+      const simpleEquity = /^[A-Z]{1,5}$/;
+
+      // Money-market / fund-style like FGXXX -> reject if ends with 'XXX'
+      if (/XXX$/.test(base)) return null;
+
+      if (shareClassSlash.test(base)) {
+        return base;
+      }
+
+      if (!simpleEquity.test(base)) {
+        // reject anything with digits or weird punctuation
+        return null;
+      }
+
+      return base;
+    }
+
+    // Decide if a row is likely an ETF/fund based on security name
+    function isLikelyETF(ticker, name) {
+      const n = (name || "").toLowerCase();
+      if (!n) return false;
+
+      // Strong ETF/fund indicators in the security name
+      const keywords = [
+        " etf",
+        "exchange traded fund",
+        "exchange-traded fund",
+        "index fund",
+        "index etf",
+        "fund ",
+        "fund,",
+        "fund (",
+        "fund-",
+        "spdr ",
+        "ishares",
+        "vanguard",
+        "invesco",
+        "xtrackers",
+        "wisdomtree",
+        "ark ",
+        "arkf",
+        "arkg",
+        "arkk",
+        "arkq",
+        "arkw"
+      ];
+
+      // We always treat explicit "etf" as ETF
+      if (/\betf\b/i.test(name || "")) return true;
+
+      for (const kw of keywords) {
+        if (n.includes(kw)) return true;
+      }
+
+      // Otherwise, assume it's not an ETF
+      return false;
     }
 
     // Detect delimiter by counting commas/semicolons/tabs in the first few lines
@@ -284,13 +357,13 @@
         for (let i = 0; i < splitLines.length; i++) {
           const cols = splitLines[i];
           if (col >= cols.length) continue;
-          const t = sanitizeTicker(cols[col]);
-          if (!t) continue;
+          const eq = normalizeEquityTicker(cols[col]);
+          if (!eq) continue;
 
-          // Strong preference for "typical" ticker shapes
-          if (/^[A-Z]{1,6}$/.test(t)) {
+          // Strong preference for typical equity length (<=5, letters only)
+          if (/^[A-Z]{1,5}$/.test(eq)) {
             score += 3;
-          } else if (/^[A-Z0-9.\-]{1,8}$/.test(t) && !/\s/.test(t)) {
+          } else if (/^[A-Z]{1,4}\/[A-Z]$/.test(eq)) {
             score += 2;
           } else {
             score += 1;
@@ -303,15 +376,15 @@
       }
 
       if (bestScore <= 0) {
-        return { headerRowIndex: 0, tickerIdx: 0 }; // last-resort fallback
+        return { headerRowIndex: 0, tickerIdx: 0 }; // fallback
       }
 
       // Assume first line is header if we got here
       return { headerRowIndex: 0, tickerIdx: bestCol };
     }
 
-    // Robust CSV/TSV parser for tickers
-    function parseCsvForTickers(text) {
+    // Parse CSV/TSV and return only equity (non-ETF) tickers
+    function parseCsvForEquities(text) {
       const rawLines = text.split(/\r?\n/);
       const lines = rawLines.filter((l) => l.trim());
       if (!lines.length) return [];
@@ -325,10 +398,24 @@
       );
 
       if (tickerIdx === -1) {
-        // No obvious header names – guess by ticker pattern
+        // No obvious header names – guess by equity pattern
         const guess = guessTickerColumn(lines, delimiter);
         headerRowIndex = guess.headerRowIndex;
         tickerIdx = guess.tickerIdx;
+      }
+
+      // Try to find a name/description column on the header row (if any)
+      let nameIdx = -1;
+      if (headerRowIndex >= 0 && headerRowIndex < lines.length) {
+        const headerCols = lines[headerRowIndex]
+          .split(delimiter)
+          .map((c) => c.trim());
+        nameIdx = headerCols.findIndex((h) =>
+          /(name|description|security)/i.test(h)
+        );
+        if (nameIdx < 0) {
+          nameIdx = -1;
+        }
       }
 
       const startRow = Math.min(headerRowIndex + 1, lines.length);
@@ -337,8 +424,18 @@
       for (let i = startRow; i < lines.length; i++) {
         const cols = lines[i].split(delimiter);
         if (!cols.length || tickerIdx >= cols.length) continue;
-        const t = sanitizeTicker(cols[tickerIdx]);
-        if (t) tickers.push(t);
+
+        const rawTicker = cols[tickerIdx];
+        const rawName =
+          nameIdx >= 0 && nameIdx < cols.length ? cols[nameIdx] : "";
+
+        const eqTicker = normalizeEquityTicker(rawTicker);
+        if (!eqTicker) continue;
+
+        // If we have a name/description, use it to remove ETFs/funds
+        if (isLikelyETF(eqTicker, rawName)) continue;
+
+        tickers.push(eqTicker);
       }
 
       return tickers;
@@ -358,7 +455,7 @@
         if (pf.error) {
           div.textContent = `${pf.name}: error – ${pf.error}`;
         } else {
-          div.textContent = `${pf.name}: ${pf.tickers.length} tickers`;
+          div.textContent = `${pf.name}: ${pf.tickers.length} equity tickers`;
         }
         fileSummaryEl.appendChild(div);
       });
@@ -383,7 +480,7 @@
         reader.onload = () => {
           try {
             const text = reader.result;
-            const tickers = parseCsvForTickers(text);
+            const tickers = parseCsvForEquities(text);
             parsedFiles.push({ name: file.name, tickers });
           } catch (e) {
             console.error(e);
@@ -398,12 +495,12 @@
               updateFileSummary();
               if (parsedFiles.some((pf) => pf.tickers.length > 0)) {
                 setStatus(
-                  "Files loaded. Click 'Aggregate tickers' to build the combined list.",
+                  "Files loaded. Click 'Aggregate tickers' to build the combined equity list.",
                   "ok"
                 );
               } else {
                 setStatus(
-                  "Files loaded but no tickers detected – check the CSV format.",
+                  "Files loaded but no equity tickers detected – check the CSV format.",
                   "error"
                 );
               }
@@ -443,18 +540,17 @@
       const allTickers = parsedFiles.flatMap((pf) => pf.tickers || []);
       if (!allTickers.length) {
         setStatus(
-          "No tickers found in the loaded files (check headers/format).",
+          "No equity tickers found in the loaded files.",
           "error"
         );
         return;
       }
 
       const unique = Array.from(new Set(allTickers)).sort();
-      // Join directly – tickers are already cleaned and have no wrapping quotes
       commaOutputEl.value = unique.join(", ");
 
       setStatus(
-        `Aggregated ${unique.length} unique tickers from ${allTickers.length} total entries.`,
+        `Aggregated ${unique.length} unique equity tickers from ${allTickers.length} total entries.`,
         "ok"
       );
     });

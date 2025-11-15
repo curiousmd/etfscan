@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ETF Holdings Aggregator (BOUT / FFTY / QMOM)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      color: #111827;
+      background: #f3f4f6;
+    }
+    body {
+      margin: 0;
+      padding: 24px 12px 40px;
+      display: flex;
+      justify-content: center;
+    }
+    .app {
+      width: 100%;
+      max-width: 960px;
+      background: #ffffff;
+      border-radius: 18px;
+      padding: 24px 24px 32px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 1.6rem;
+    }
+    .subtitle {
+      margin: 0 0 24px;
+      color: #6b7280;
+      font-size: 0.95rem;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    textarea {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+      box-sizing: border-box;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      background: #f9fafb;
+      min-height: 80px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+    }
+    textarea:focus {
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.4);
+      background: #ffffff;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    button {
+      border-radius: 999px;
+      border: none;
+      padding: 9px 18px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+      transition: transform 0.1s, box-shadow 0.1s, background 0.1s;
+    }
+    button.primary {
+      background: #4f46e5;
+      color: #ffffff;
+    }
+    button.secondary {
+      background: #e5e7eb;
+      color: #111827;
+      box-shadow: none;
+    }
+    button:active {
+      transform: translateY(1px);
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+      box-shadow: none;
+      transform: none;
+    }
+    .mt-8 { margin-top: 8px; }
+    .mt-16 { margin-top: 16px; }
+    .mt-24 { margin-top: 24px; }
+    .mt-32 { margin-top: 32px; }
+    .small {
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .status {
+      margin-top: 6px;
+      font-size: 0.83rem;
+    }
+    .status.error {
+      color: #b91c1c;
+    }
+    .status.ok {
+      color: #15803d;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      border-radius: 14px;
+      border: 1px solid #e5e7eb;
+      padding: 14px 14px 16px;
+      background: #f9fafb;
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+    .card-sub {
+      font-size: 0.78rem;
+      color: #6b7280;
+    }
+    .ticker-list {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: normal;
+      word-wrap: break-word;
+    }
+    @media (max-width: 640px) {
+      .app {
+        padding: 18px 14px 24px;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>ETF Holdings Aggregator</h1>
+    <p class="subtitle">
+      Fetch daily holdings for <strong>BOUT</strong>, <strong>FFTY</strong> and
+      <strong>QMOM</strong>, then aggregate tickers into a single
+      comma-separated list for copy/paste.
+    </p>
+
+    <!-- Controls -->
+    <div>
+      <div class="row mt-8">
+        <button id="fetchBtn" class="primary">
+          🔄 Fetch holdings
+        </button>
+        <span class="pill">
+          Tracking: BOUT, FFTY, QMOM
+        </span>
+      </div>
+
+      <div id="status" class="status"></div>
+      <div id="lastUpdated" class="status small"></div>
+      <p class="small mt-8">
+        API key is hard-coded in the file. For security, only use this on your own
+        machine and don’t share this HTML with your real key inside.
+      </p>
+    </div>
+
+    <!-- Per-ETF breakdown -->
+    <div class="mt-32">
+      <h2 style="font-size:1.15rem; margin:0 0 8px;">Per-ETF holdings</h2>
+      <p class="small" style="margin:0 0 12px;">
+        The tickers below come directly from the latest ETF holdings data.
+      </p>
+      <div id="etfCards" class="card-grid"></div>
+    </div>
+
+    <!-- Aggregated output -->
+    <div class="mt-32">
+      <h2 style="font-size:1.15rem; margin:0 0 8px;">Aggregated tickers</h2>
+      <p class="small" style="margin:0 0 8px;">
+        Unique tickers across BOUT + FFTY + QMOM (sorted alphabetically).
+      </p>
+
+      <label for="commaOutput" style="margin-bottom:4px;">
+        Comma-separated
+      </label>
+      <textarea id="commaOutput" placeholder="AAPL, MSFT, ..."></textarea>
+
+      <div class="row mt-8">
+        <button id="copyCommaBtn" class="secondary">
+          📋 Copy comma-separated list
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 🔑 Put your Finnhub API key here:
+    const FINNHUB_API_KEY = "d4bsh5pr01qoua31bj4gd4bsh5pr01qoua31bj50";
+
+    const ETF_SYMBOLS = ["BOUT", "FFTY", "QMOM"];
+    const FETCH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h auto-refresh
+
+    const statusEl = document.getElementById("status");
+    const lastUpdatedEl = document.getElementById("lastUpdated");
+    const etfCardsEl = document.getElementById("etfCards");
+    const commaOutputEl = document.getElementById("commaOutput");
+    const fetchBtn = document.getElementById("fetchBtn");
+    const copyCommaBtn = document.getElementById("copyCommaBtn");
+
+    function setStatus(message, type = "") {
+      statusEl.textContent = message || "";
+      statusEl.className = "status" + (type ? " " + type : "");
+    }
+
+    function setLastUpdated(date) {
+      if (!date) {
+        lastUpdatedEl.textContent = "";
+        return;
+      }
+      lastUpdatedEl.textContent = "Last updated: " + date.toLocaleString();
+    }
+
+    function sanitizeTicker(raw) {
+      if (!raw) return null;
+      const t = String(raw).trim().toUpperCase();
+      if (!t) return null;
+      if (!/[A-Z]/.test(t)) return null; // basic filter
+      return t;
+    }
+
+    async function fetchHoldingsForETF(etfSymbol, apiKey) {
+      const url =
+        "https://finnhub.io/api/v1/etf/holdings?symbol=" +
+        encodeURIComponent(etfSymbol) +
+        "&token=" +
+        encodeURIComponent(apiKey);
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(
+          etfSymbol + ": HTTP " + res.status + " " + res.statusText
+        );
+      }
+      const data = await res.json();
+
+      const rawHoldings = Array.isArray(data.holdings)
+        ? data.holdings
+        : [];
+
+      const tickers = rawHoldings
+        .map((h) => sanitizeTicker(h.symbol || h.ticker || h.code))
+        .filter(Boolean);
+
+      return {
+        etf: etfSymbol,
+        tickers,
+        count: tickers.length,
+      };
+    }
+
+    function renderEtfCards(results) {
+      etfCardsEl.innerHTML = "";
+      if (!results || !results.length) return;
+
+      results.forEach((r) => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const header = document.createElement("div");
+        header.className = "card-header";
+
+        const title = document.createElement("div");
+        title.className = "card-title";
+        title.textContent = r.etf;
+
+        const sub = document.createElement("div");
+        sub.className = "card-sub";
+        sub.textContent = r.count + " tickers";
+
+        header.appendChild(title);
+        header.appendChild(sub);
+
+        const list = document.createElement("div");
+        list.className = "ticker-list";
+        list.textContent = r.tickers.join(", ");
+
+        card.appendChild(header);
+        card.appendChild(list);
+        etfCardsEl.appendChild(card);
+      });
+    }
+
+    function aggregateTickers(results) {
+      const set = new Set();
+      results.forEach((r) => {
+        r.tickers.forEach((t) => set.add(t));
+      });
+      return Array.from(set).sort();
+    }
+
+    async function fetchAllHoldings() {
+      if (!FINNHUB_API_KEY || FINNHUB_API_KEY === "YOUR_FINNHUB_API_KEY_HERE") {
+        setStatus(
+          "Please edit the file and set FINNHUB_API_KEY to your real key.",
+          "error"
+        );
+        return;
+      }
+
+      fetchBtn.disabled = true;
+      copyCommaBtn.disabled = true;
+      setStatus("Fetching holdings for BOUT, FFTY, QMOM...", "");
+      setLastUpdated(null);
+
+      try {
+        const promises = ETF_SYMBOLS.map((sym) =>
+          fetchHoldingsForETF(sym, FINNHUB_API_KEY)
+        );
+        const results = await Promise.all(promises);
+
+        renderEtfCards(results);
+
+        const aggregated = aggregateTickers(results);
+        commaOutputEl.value = aggregated.join(", ");
+
+        setStatus(
+          "Holdings fetched successfully. Aggregated " +
+            aggregated.length +
+            " unique tickers.",
+          "ok"
+        );
+        setLastUpdated(new Date());
+        copyCommaBtn.disabled = false;
+      } catch (err) {
+        console.error(err);
+        setStatus("Error fetching holdings: " + err.message, "error");
+      } finally {
+        fetchBtn.disabled = false;
+      }
+    }
+
+    async function copyCommaSeparated() {
+      const text = commaOutputEl.value.trim();
+      if (!text) {
+        setStatus(
+          "Nothing to copy yet – fetch holdings first.",
+          "error"
+        );
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus(
+          "Comma-separated tickers copied to clipboard ✅",
+          "ok"
+        );
+      } catch (err) {
+        console.error(err);
+        setStatus(
+          "Could not copy to clipboard (browser blocked it).",
+          "error"
+        );
+      }
+    }
+
+    // Event listeners
+    fetchBtn.addEventListener("click", fetchAllHoldings);
+    copyCommaBtn.addEventListener("click", copyCommaSeparated);
+
+    // Optional: auto-refresh once per day while the page is open
+    setInterval(() => {
+      fetchAllHoldings();
+    }, FETCH_INTERVAL_MS);
+  </script>
+</body>
+</html>

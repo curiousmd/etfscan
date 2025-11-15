@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ETF Holdings Aggregator – US Common Stocks Only</title>
+  <title>ETF Holdings Aggregator – BOUT + FFTY + QMOM (US Stocks Only)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -81,12 +81,6 @@
       transform: translateY(1px);
       box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2);
     }
-    button:disabled {
-      opacity: 0.6;
-      cursor: default;
-      box-shadow: none;
-      transform: none;
-    }
 
     textarea {
       width: 100%;
@@ -140,14 +134,13 @@
   <div class="app">
     <h1>ETF Holdings Aggregator</h1>
     <p class="subtitle">
-      Upload <code>xt_holdings</code>-style CSVs and/or simple holdings files
-      (like <code>QMOM Holdings.csv</code>). This tool extracts
-      <strong>only U.S.-style common stocks</strong> and, for
-      <code>xt_holdings</code>, only keeps rows where
-      <strong>Account = BOUT or FFTY</strong>.
+      Upload:
+      <br>• <strong>xt_holdings.csv</strong> (we take only <strong>Account = BOUT, FFTY</strong>)
+      <br>• plus any simple ETF holdings files (e.g. <strong>QMOM Holdings.csv</strong> with a Ticker column).
+      <br>
+      The tool returns a union of <strong>U.S. common-stock tickers</strong>, comma-separated (no quotes).
     </p>
 
-    <!-- File upload -->
     <div>
       <label for="filesInput">Holdings CSV files</label>
       <input
@@ -157,11 +150,13 @@
         multiple
       />
       <p class="small mt-4">
-        • For <code>xt_holdings.csv</code>: we use columns
-        <code>Account, StockTicker, CUSIP, SecurityName, MoneyMarketFlag</code>.<br />
-        &nbsp;&nbsp;Only rows with <strong>Account = BOUT or FFTY</strong> are kept.<br />
-        • For simple ETF holdings (e.g. QMOM): any CSV with a
-        <code>Ticker</code> / <code>Symbol</code> column works and all rows are used.
+        • If a file has columns <code>Date, Account, StockTicker, CUSIP, SecurityName, MoneyMarketFlag</code>,
+          it is treated as <code>xt_holdings</code> and only rows where
+          <strong>Account = BOUT or FFTY</strong> are used.
+        <br>• Any file with a <code>Ticker</code> / <code>Symbol</code> column is treated as a simple
+          holdings file (e.g. QMOM), and all rows are used.
+        <br>• In all cases, we then filter to <strong>U.S.-style common stocks</strong>
+          (no ETFs, swaps/options, bonds/T-bills, money market, cash, ADR/foreign common, etc.).
       </p>
 
       <div id="fileSummary" class="file-summary" style="display:none;"></div>
@@ -172,12 +167,11 @@
       </div>
     </div>
 
-    <!-- Output -->
     <div class="mt-32">
       <h2 style="font-size:1.15rem; margin:0 0 8px;">Comma-separated U.S. stocks</h2>
       <p class="small" style="margin:0 0 8px;">
-        Unique U.S.-style common-stock tickers (BOUT + FFTY from xt_holdings,
-        plus any other uploaded holdings like QMOM), sorted alphabetically, no quotes.
+        Unique tickers across BOUT + FFTY (from xt_holdings) and other uploaded ETFs (like QMOM).
+        Sorted alphabetically, no quotes.
       </p>
 
       <label for="commaOutput" style="margin-bottom:4px;">Output</label>
@@ -206,13 +200,13 @@
       statusEl.className = "status" + (type ? " " + type : "");
     }
 
-    // Normalize a ticker to an equity-style code (US-like)
+    // --- Core normalization / filters ---
+
     function normalizeEquityTicker(raw) {
       if (!raw) return null;
       let t = String(raw).trim();
       if (!t) return null;
 
-      // Strip wrapping quotes
       if (
         (t.startsWith('"') && t.endsWith('"')) ||
         (t.startsWith("'") && t.endsWith("'"))
@@ -221,7 +215,6 @@
       }
       if (!t) return null;
 
-      // Take only first token before whitespace (e.g. "AAPL TRS 0929" -> "AAPL")
       let base = t.split(/\s+/)[0].trim().toUpperCase();
       if (!base) return null;
 
@@ -229,11 +222,9 @@
       if (blacklistExact.has(base)) return null;
       if (base.includes("&")) return null;
 
-      // Allow share-class symbols with slash (BRK/B, HEI/A, CWEN/A)
       const shareClassSlash = /^[A-Z]{1,4}\/[A-Z]$/;
       const simpleEquity = /^[A-Z]{1,5}$/;
 
-      // Money-market style like FGXXX: drop
       if (/XXX$/.test(base)) return null;
 
       if (shareClassSlash.test(base)) return base;
@@ -242,7 +233,6 @@
       return base;
     }
 
-    // Non-equity filter: ETF, swaps, options, bonds, MMF, cash, etc.
     function isLikelyNonEquity(ticker, name, mmFlag, cusip) {
       const n = (name || "").toUpperCase();
       const mm = (mmFlag || "").toUpperCase().trim();
@@ -254,7 +244,7 @@
 
       // US Treasuries / bills
       if (/\b(TREASURY|T-BILL|TBILL|T BILL)\b/.test(n)) return true;
-      if (c.startsWith("9127")) return true; // common US Treasury CUSIP prefix
+      if (c.startsWith("9127")) return true;
 
       // ETFs / funds
       if (/\bETF\b/.test(n)) return true;
@@ -267,29 +257,24 @@
         if (n.includes(w)) return true;
       }
 
-      // Derivatives: swaps, TRS, options, futures, warrants, rights
+      // Derivatives
       if (/\b(SWAP|SWP|TRS|TOTAL RETURN|FUTURE|FUTURES|FORWARD|FWD|OPTION|CALL|PUT|WARRANT|RIGHTS?)\b/.test(n)) {
         return true;
       }
 
-      // Notes / bonds / preferreds
+      // Debt / preferred
       if (/\b(BOND|NOTE|DEBENTURE|PFD|PREFERRED)\b/.test(n)) return true;
 
-      // Anything explicitly saying "INDEX" that's not clearly a company
       if (/\bINDEX\b/.test(n) && !/\bCORP\b/.test(n)) return true;
 
       return false;
     }
 
-    // Additional: filter to *U.S. common stocks* as best as possible
     function isLikelyNonUSCommon(ticker, name, cusip) {
       const n = (name || "").toUpperCase();
 
-      // ADRs / depositary receipts / foreign listing hints
       if (/\b(ADR|ADS|GDR|SP ADR|UNSPONSORED)\b/.test(n)) return true;
       if (/\b(ORDINARY|ORD SHS|ORD SHARES|ORD)\b/.test(n)) return true;
-
-      // Common non-US legal forms at end of name: PLC, SA, NV, AG, BV, OYJ, etc.
       if (/\b(PLC|S\.?A\.?|N\.?V\.?|AG|BV|OYJ|S\.P\.A\.?|SPA)\b/.test(n)) {
         return true;
       }
@@ -297,7 +282,8 @@
       return false;
     }
 
-    // Detect delimiter (comma / semicolon / tab)
+    // --- CSV helpers ---
+
     function detectDelimiter(lines) {
       const candidates = [",", ";", "\t"];
       const scores = { ",": 0, ";": 0, "\t": 0 };
@@ -319,109 +305,49 @@
       return best;
     }
 
-    // Fallback: guess ticker column by pattern if header isn't clear
-    function guessTickerColumn(lines, delimiter) {
-      const maxScanLines = Math.min(lines.length, 30);
-      let maxCols = 0;
-      const splitLines = [];
-      for (let i = 0; i < maxScanLines; i++) {
-        const cols = lines[i].split(delimiter);
-        splitLines.push(cols);
-        if (cols.length > maxCols) maxCols = cols.length;
-      }
-      let bestCol = -1;
-      let bestScore = -1;
-      for (let col = 0; col < maxCols; col++) {
-        let score = 0;
-        for (const cols of splitLines) {
-          if (col >= cols.length) continue;
-          const eq = normalizeEquityTicker(cols[col]);
-          if (!eq) continue;
-          if (/^[A-Z]{1,5}$/.test(eq)) score += 3;
-          else if (/^[A-Z]{1,4}\/[A-Z]$/.test(eq)) score += 2;
-          else score += 1;
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          bestCol = col;
-        }
-      }
-      if (bestScore <= 0) return { headerRowIndex: 0, tickerIdx: 0 };
-      return { headerRowIndex: 0, tickerIdx: bestCol };
-    }
+    // --- xt_holdings-specific parser (BOUT + FFTY only) ---
 
-    // Parse CSV and return U.S. common stock tickers.
-    // If there is an Account column and it contains BOUT/FFTY, we keep ONLY those rows.
-    // If there is no Account column (e.g. QMOM Holdings), we use all rows.
-    function parseCsvForUSCommon(text) {
+    function parseXtHoldingsFile(text) {
       const rawLines = text.split(/\r?\n/);
       const lines = rawLines.filter((l) => l.trim());
       if (!lines.length) return [];
 
       const delimiter = detectDelimiter(lines);
+      const headerLine = lines[0];
+      const headerCols = headerLine.split(delimiter).map((c) => c.trim());
 
-      // Assume first non-empty line is header
-      const headerRowIndex = 0;
-      const headerCols = lines[headerRowIndex]
-        .split(delimiter)
-        .map((c) => c.trim());
+      // Expect exact xt_holdings headers
+      const accountIdx = headerCols.indexOf("Account");
+      const tickerIdx = headerCols.indexOf("StockTicker");
+      const nameIdx = headerCols.indexOf("SecurityName");
+      const cusipIdx = headerCols.indexOf("CUSIP");
+      const mmIdx = headerCols.indexOf("MoneyMarketFlag");
 
-      let tickerIdx = headerCols.findIndex((h) =>
-        /(stock\s*ticker|ticker|symbol|underlying)/i.test(h)
-      );
-      if (tickerIdx < 0) {
-        // Fallback guessing
-        const g = guessTickerColumn(lines, delimiter);
-        tickerIdx = g.tickerIdx;
+      if (accountIdx === -1 || tickerIdx === -1 || nameIdx === -1) {
+        // Not xt_holdings, bail
+        return null;
       }
 
-      const nameIdx = headerCols.findIndex((h) =>
-        /(security\s*name|name|description)/i.test(h)
-      );
-      const mmIdx = headerCols.findIndex((h) =>
-        /(moneymarketflag|money\s*market|mmflag)/i.test(h)
-      );
-      const cusipIdx = headerCols.findIndex((h) =>
-        /cusip/i.test(h)
-      );
-      const accountIdx = headerCols.findIndex((h) =>
-        /account/i.test(h)
-      );
-
-      const hasAccountColumn = accountIdx >= 0;
       const allowedAccounts = new Set(["BOUT", "FFTY"]);
-
-      const startRow = Math.min(headerRowIndex + 1, lines.length);
       const tickers = [];
 
-      for (let i = startRow; i < lines.length; i++) {
+      for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(delimiter);
-        if (!cols.length || tickerIdx >= cols.length) continue;
+        if (!cols.length) continue;
 
-        // If this CSV has an Account column, only keep BOUT & FFTY
-        if (hasAccountColumn) {
-          const rawAccount = cols[accountIdx] || "";
-          const acct = rawAccount.toString().trim().toUpperCase();
-          if (!allowedAccounts.has(acct)) {
-            continue;
-          }
-        }
+        const rawAccount = cols[accountIdx] || "";
+        const acct = rawAccount.toString().trim().toUpperCase();
+        if (!allowedAccounts.has(acct)) continue;
 
         const rawTicker = cols[tickerIdx];
-        const rawName =
-          nameIdx >= 0 && nameIdx < cols.length ? cols[nameIdx] : "";
-        const rawMM =
-          mmIdx >= 0 && mmIdx < cols.length ? cols[mmIdx] : "";
-        const rawCusip =
-          cusipIdx >= 0 && cusipIdx < cols.length ? cols[cusipIdx] : "";
+        const rawName = cols[nameIdx] || "";
+        const rawCusip = cusipIdx >= 0 && cusipIdx < cols.length ? cols[cusipIdx] : "";
+        const rawMM = mmIdx >= 0 && mmIdx < cols.length ? cols[mmIdx] : "";
 
         const eqTicker = normalizeEquityTicker(rawTicker);
         if (!eqTicker) continue;
 
-        // Drop non-equities (ETF, TRS, options, bonds, MMF, cash ...)
         if (isLikelyNonEquity(eqTicker, rawName, rawMM, rawCusip)) continue;
-
-        // Additional: drop non-US / non-common
         if (isLikelyNonUSCommon(eqTicker, rawName, rawCusip)) continue;
 
         tickers.push(eqTicker);
@@ -429,6 +355,62 @@
 
       return tickers;
     }
+
+    // --- Generic holdings parser (for QMOM-style CSVs) ---
+
+    function parseGenericHoldingsFile(text) {
+      const rawLines = text.split(/\r?\n/);
+      const lines = rawLines.filter((l) => l.trim());
+      if (!lines.length) return [];
+
+      const delimiter = detectDelimiter(lines);
+      const headerCols = lines[0].split(delimiter).map((c) => c.trim());
+
+      // Locate a ticker-like column: Ticker, Symbol, etc.
+      let tickerIdx = headerCols.findIndex((h) =>
+        /^(ticker|symbol)$/i.test(h)
+      );
+      if (tickerIdx === -1) {
+        // nothing sensible
+        return [];
+      }
+
+      // Optional name / cusip / mmflag columns
+      const nameIdx = headerCols.findIndex((h) =>
+        /(security\s*name|name|description)/i.test(h)
+      );
+      const cusipIdx = headerCols.findIndex((h) => /cusip/i.test(h));
+      const mmIdx = headerCols.findIndex((h) =>
+        /(moneymarketflag|money\s*market|mmflag)/i.test(h)
+      );
+
+      const tickers = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(delimiter);
+        if (!cols.length || tickerIdx >= cols.length) continue;
+
+        const rawTicker = cols[tickerIdx];
+        const rawName =
+          nameIdx >= 0 && nameIdx < cols.length ? cols[nameIdx] : "";
+        const rawCusip =
+          cusipIdx >= 0 && cusipIdx < cols.length ? cols[cusipIdx] : "";
+        const rawMM =
+          mmIdx >= 0 && mmIdx < cols.length ? cols[mmIdx] : "";
+
+        const eqTicker = normalizeEquityTicker(rawTicker);
+        if (!eqTicker) continue;
+
+        if (isLikelyNonEquity(eqTicker, rawName, rawMM, rawCusip)) continue;
+        if (isLikelyNonUSCommon(eqTicker, rawName, rawCusip)) continue;
+
+        tickers.push(eqTicker);
+      }
+
+      return tickers;
+    }
+
+    // --- File orchestration ---
 
     function updateFileSummary() {
       if (!parsedFiles.length) {
@@ -469,7 +451,12 @@
         reader.onload = () => {
           try {
             const text = reader.result;
-            const tickers = parseCsvForUSCommon(text);
+            // First try xt_holdings parser
+            let tickers = parseXtHoldingsFile(text);
+            if (tickers === null) {
+              // Not xt_holdings; use generic (QMOM-style) parser
+              tickers = parseGenericHoldingsFile(text);
+            }
             parsedFiles.push({ name: file.name, tickers });
           } catch (e) {
             console.error(e);
@@ -482,14 +469,14 @@
             remaining--;
             if (remaining === 0) {
               updateFileSummary();
-              if (parsedFiles.some((pf) => pf.tickers.length > 0)) {
+              if (parsedFiles.some((pf) => (pf.tickers || []).length > 0)) {
                 setStatus(
                   "Files loaded. Click 'Aggregate U.S. common stocks' to build the combined list.",
                   "ok"
                 );
               } else {
                 setStatus(
-                  "Files loaded but no U.S. common stocks detected – check that the files are valid holdings CSVs.",
+                  "Files loaded but no U.S. common stocks detected – check that the files are xt_holdings or QMOM-style holdings CSVs.",
                   "error"
                 );
               }
@@ -539,7 +526,7 @@
       commaOutputEl.value = unique.join(", ");
 
       setStatus(
-        `Aggregated ${unique.length} unique U.S. common-stock tickers from ${allTickers.length} total rows after filtering.`,
+        `Aggregated ${unique.length} unique U.S. common-stock tickers from ${allTickers.length} rows after filtering.`,
         "ok"
       );
     });
